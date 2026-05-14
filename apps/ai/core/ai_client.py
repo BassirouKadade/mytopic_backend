@@ -95,6 +95,13 @@ def generate_image(prompt: str, size: str = "1024x1024") -> dict[str, str]:
     if not cleaned_prompt:
         raise AIClientError("Prompt is required.")
 
+    image_only_prompt = (
+        f"{cleaned_prompt}\n\n"
+        "Hard constraint: generate an image-only visual. Do not include any "
+        "readable text, letters, numbers, title, headline, caption, label, "
+        "logo, watermark, UI text, chart text, sign, poster, or typography."
+    )
+
     ai_settings = _get_ai_settings()
 
     if not ai_settings.OPENAI_API_KEY:
@@ -104,7 +111,7 @@ def generate_image(prompt: str, size: str = "1024x1024") -> dict[str, str]:
         endpoint="images/generations",
         payload={
             "model": "gpt-image-1",
-            "prompt": cleaned_prompt,
+            "prompt": image_only_prompt,
             "size": size,
         },
         api_key=ai_settings.OPENAI_API_KEY,

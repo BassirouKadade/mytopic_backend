@@ -502,6 +502,8 @@ def normalize_cover_slide(data: dict[str, Any]) -> None:
     if data["presentation_subtitle"] and data["presentation_subtitle"] not in cover["main_content"]:
         cover["main_content"] = [data["presentation_subtitle"], *cover["main_content"]][:4]
 
+    cover["main_content"] = _normalize_cover_metadata(cover, data)
+
 
 def normalize_agenda_slide(slides: list[dict[str, Any]], language: str) -> None:
     """
@@ -513,6 +515,8 @@ def normalize_agenda_slide(slides: list[dict[str, Any]], language: str) -> None:
     agenda = slides[1]
     derived_items = derive_agenda_items(slides, language)
     source_items = agenda["main_content"] or derived_items
+    if _is_placeholder_agenda_content(source_items, agenda.get("title", "")):
+        source_items = derived_items
 
     cleaned_items: list[str] = []
     seen: set[str] = set()
@@ -535,6 +539,7 @@ def normalize_agenda_slide(slides: list[dict[str, Any]], language: str) -> None:
     agenda["title"] = agenda["title"] or AGENDA_TITLE_BY_LANGUAGE.get(language, "Agenda")
     agenda["content_format"] = "bullets"
     agenda["density"] = "compact"
+    agenda["suggested_visual"] = None
     agenda_items = [
         f"{index}. {item}" for index, item in enumerate(cleaned_items[:MAX_AGENDA_ITEMS], start=1)
     ]
@@ -546,6 +551,44 @@ def normalize_agenda_slide(slides: list[dict[str, Any]], language: str) -> None:
         ]
 
     agenda["main_content"] = agenda_items
+
+
+def _normalize_cover_metadata(cover: dict[str, Any], data: dict[str, Any]) -> list[str]:
+    raw_items = [
+        str(item).strip()
+        for item in cover.get("main_content", [])
+        if str(item).strip()
+    ]
+
+    seen: set[str] = set()
+    items: list[str] = []
+    for item in raw_items:
+        key = _slugify(item)
+        if key in seen or key == _slugify(cover.get("title", "")):
+            continue
+        seen.add(key)
+        items.append(item)
+        if len(items) >= 4:
+            break
+
+    fallback_context = data.get("presentation_subtitle") or data.get("presentation_goal") or "Presentation"
+    fallback_target = data.get("target_audience") or data.get("tone") or "Academic presentation"
+
+    defaults = [
+        str(fallback_context).strip() or "Presentation",
+        "Presenter",
+        "Date",
+        str(fallback_target).strip() or "Academic presentation",
+    ]
+
+    for item in defaults:
+        if len(items) >= 4:
+            break
+        if _slugify(item) not in seen:
+            items.append(item)
+            seen.add(_slugify(item))
+
+    return items[:4]
 
 
 def normalize_conclusion_slide(slides: list[dict[str, Any]], language: str) -> None:
@@ -621,6 +664,26 @@ def derive_agenda_items(
     return items
 
 
+def _is_placeholder_agenda_content(source_items: list[Any], agenda_title: str) -> bool:
+    if not source_items:
+        return True
+
+    cleaned = [
+        clean_agenda_item(str(item))
+        for item in source_items
+        if clean_agenda_item(str(item))
+    ]
+    if not cleaned:
+        return True
+
+    if len(cleaned) == 1:
+        value = _slugify(cleaned[0])
+        title = _slugify(clean_agenda_item(agenda_title))
+        return value == title or value in {"agenda", "sommaire", "plan", "outline"}
+
+    return False
+
+
 def clean_agenda_item(value: str) -> str:
     """
     Nettoie un item d'agenda et limite sa longueur.
@@ -655,15 +718,179 @@ def strip_agenda_prefix(value: str) -> str:
 
 def enforce_required_slide_order(slides: list[dict[str, Any]]) -> None:
     """
-    Impose l'ordre minimal cover -> agenda -> ... -> conclusion/closing.
+    Impose l'ordre pedagogique cover -> agenda -> fondations -> developpement
+    -> ouverture -> conclusion.
 
     Securite:
     - Previent une structure invalide avant normalisation finale.
+    - Replace les definitions au debut du corps et la conclusion a la fin.
     """
+    if len(slides) < 3:
+        return
+
+    cover_index = next(
+        (
+            index
+            for index, slide in enumerate(slides)
+            if slide.get("slide_type") == "cover" or slide.get("semantic_type") == "cover.title"
+        ),
+        0,
+    )
+    cover = slides[cover_index]
+
+    remaining = [slide for index, slide in enumerate(slides) if index != cover_index]
+    agenda_index = next(
+        (
+            index
+            for index, slide in enumerate(remaining)
+            if slide.get("slide_type") == "agenda"
+            or slide.get("semantic_type") == "section.agenda"
+        ),
+        0,
+    )
+    agenda = remaining[agenda_index]
+    body = [slide for index, slide in enumerate(remaining) if index != agenda_index]
+
+    conclusion_candidates = [
+        slide for slide in body if _is_conclusion_candidate(slide)
+    ]
+    non_conclusion_body = [
+        slide for slide in body if not _is_conclusion_candidate(slide)
+    ]
+
+    if conclusion_candidates:
+        conclusion = conclusion_candidates[-1]
+        extra_conclusions = conclusion_candidates[:-1]
+    else:
+        conclusion = non_conclusion_body.pop() if non_conclusion_body else body[-1]
+        extra_conclusions = []
+
+    ordered_body = sorted(
+        [*non_conclusion_body, *extra_conclusions],
+        key=lambda slide: (_slide_sequence_rank(slide), slides.index(slide)),
+    )
+
+    slides[:] = [cover, agenda, *ordered_body, conclusion]
+    for index, slide in enumerate(slides, start=1):
+        slide["slide_number"] = index
+
     slides[0]["slide_type"] = "cover"
+    slides[0]["semantic_type"] = "cover.title"
     slides[1]["slide_type"] = "agenda"
-    if slides[-1]["slide_type"] not in {"conclusion", "closing"}:
-        slides[-1]["slide_type"] = "conclusion"
+    slides[1]["semantic_type"] = "section.agenda"
+    slides[-1]["slide_type"] = (
+        "closing" if slides[-1].get("semantic_type") == "closure.thank_you" else "conclusion"
+    )
+
+
+def _is_conclusion_candidate(slide: dict[str, Any]) -> bool:
+    semantic_type = str(slide.get("semantic_type", "")).strip()
+    slide_type = str(slide.get("slide_type", "")).strip()
+    text = _slugify(
+        " ".join(
+            [
+                str(slide.get("title", "")),
+                str(slide.get("purpose", "")),
+                *[str(item) for item in slide.get("main_content", [])[:2]],
+            ]
+        )
+    )
+
+    return (
+        slide_type in {"conclusion", "closing"}
+        or semantic_type in {"closure.conclusion", "closure.thank_you"}
+        or any(
+            keyword in text
+            for keyword in (
+                "conclusion",
+                "synthese",
+                "synthesis",
+                "summary",
+                "recapitulatif",
+                "thank you",
+                "merci",
+            )
+        )
+    )
+
+
+def _slide_sequence_rank(slide: dict[str, Any]) -> int:
+    """
+    Classe les slides de corps dans un ordre pedagogique stable.
+
+    Securite:
+    - Les definitions et fondations remontent en debut de presentation.
+    - Les limites et perspectives restent pres de la fin, avant la conclusion.
+    """
+    semantic_type = str(slide.get("semantic_type", "")).strip()
+    content_format = str(slide.get("content_format", "")).strip()
+    text = _slugify(
+        " ".join(
+            [
+                str(slide.get("title", "")),
+                str(slide.get("purpose", "")),
+                *[str(item) for item in slide.get("main_content", [])[:3]],
+            ]
+        )
+    )
+
+    if semantic_type in {"content.definition", "content.definition_list", "academic.definition"}:
+        return 0
+    if content_format == "definition":
+        return 0
+    if any(keyword in text for keyword in ("definition", "definitions", "notion", "concept")):
+        return 0
+
+    if any(
+        keyword in text
+        for keyword in (
+            "introduction",
+            "contexte",
+            "context",
+            "origine",
+            "origines",
+            "origin",
+            "historique",
+            "fondement",
+            "fondements",
+            "foundation",
+            "principes",
+            "principle",
+        )
+    ):
+        return 1
+
+    if any(
+        keyword in text
+        for keyword in (
+            "structure",
+            "architecture",
+            "composant",
+            "component",
+            "fonctionnement",
+            "apprentissage",
+            "mecanisme",
+            "mechanism",
+        )
+    ):
+        return 2
+
+    if semantic_type.startswith("diagram.") or content_format in {"process", "workflow"}:
+        return 3
+    if any(keyword in text for keyword in ("type", "types", "classification", "categorie", "method")):
+        return 4
+    if any(keyword in text for keyword in ("application", "usage", "use case", "cas d")):
+        return 5
+    if semantic_type.startswith("data.") or content_format in {"table", "kpi"}:
+        return 6
+    if any(keyword in text for keyword in ("limite", "limites", "defi", "defis", "challenge", "risk", "risque")):
+        return 7
+    if any(keyword in text for keyword in ("perspective", "perspectives", "future", "avenir", "evolution")):
+        return 8
+    if _is_conclusion_candidate(slide):
+        return 9
+
+    return 5
 
 
 def _normalize_sources(raw_sources: Any) -> list[str]:

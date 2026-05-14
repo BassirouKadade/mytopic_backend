@@ -197,15 +197,23 @@ PRESENTATION REQUIREMENTS
 - The final slide MUST be a conclusion slide.
 - The slides between them must develop the subject progressively and clearly.
 - The plan and sequence MUST be topic-adaptive, never generic by default.
+- If the deck contains a definition, key concept, or foundational concept
+  slide, it must appear at the beginning of the body immediately after the
+  agenda, before origins, applications, limits, or perspectives.
+- Perspective, future, limits, and challenge slides must appear near the end,
+  but always before the final conclusion.
 
 COVER SLIDE REQUIREMENTS
 - The deck must never start without a cover slide.
 - The cover slide should be organized like a real presentation cover.
 - Include the main title.
 - Include a subtitle when useful.
-- In main_content, include short metadata lines when relevant:
-  author, team, date, institution, course, or project context.
+- In main_content, include 2 to 4 short metadata lines for the cover.
+- Prefer this order when information is known or safely generic:
+  subject/context, author or presenter, date, course/institution/project type.
 - Do not invent precise personal information if it is unknown.
+- If author, course, or institution is unknown, use neutral placeholders such
+  as "Presenter", "Date", or "Academic presentation" instead of fake names.
 
 AGENDA / PLAN REQUIREMENTS
 - The second slide must contain only the plan of the presentation.
@@ -223,6 +231,27 @@ BODY SLIDES REQUIREMENTS
 - Each slide must focus on one main idea.
 - The content must be well structured and easy to present aloud.
 - The presentation must feel pedagogical, coherent, and natural.
+
+VISUAL INTELLIGENCE RULES
+- Use suggested_visual as an image-generation brief only when an image would
+  genuinely improve understanding, emotion, memorability, or context.
+- Slide 1 should usually have a strong cover visual.
+- Slide 2, the agenda / plan slide, MUST have suggested_visual: null.
+- Do not suggest images for pure agenda, table, KPI, diagram, process,
+  workflow, quote, Q&A, or conclusion slides unless the semantic_type is
+  explicitly visual.*.
+- For conceptual or explanatory body slides, suggest an image only when there
+  is a clear scene, object, metaphor, domain environment, or human/contextual
+  situation to show.
+- Every suggested_visual must be a concise visual brief for an image model:
+  describe subject, setting, mood, style, and composition.
+- The suggested_visual field must describe only what should appear visually.
+  It must not repeat the slide title, presentation title, headings, captions,
+  labels, or any exact words that could be rendered inside the image.
+- Never ask for readable text, letters, numbers, labels, logos, UI screenshots,
+  watermarks, signs, posters, or charts inside suggested_visual.
+- If a visual needs to communicate a concept, use objects, scenes, people,
+  environment, symbols, or abstract forms instead of text.
 
 NARRATIVE RULES
 - Build a coherent progression from start to finish.
@@ -292,6 +321,8 @@ Before producing the final JSON, internally ensure:
 - the deck starts with a cover slide
 - the second slide is a plan slide
 - the final slide is a conclusion slide
+- definitions and foundational concepts appear at the start of the body, not
+  at the end
 - the agenda contains only short section titles
 - the agenda is specific to the topic and not a static default sequence
 - each slide has a real purpose
